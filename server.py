@@ -23,6 +23,8 @@ import io
 import os
 import platform
 import logging
+import signal
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from collections import deque
 from flask import Flask, jsonify, request, abort, Response
@@ -52,7 +54,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+        RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
@@ -306,6 +308,7 @@ class CameraWorker:
         self._stop_event         = threading.Event()
         self._last_annotated_frame = None   # numpy BGR, ultimo frame procesado
         self._pending_cam_index  = None     # si cambia, el loop reabre la camara
+        self._stats_cache        = None     # dict publicado tras cada frame; evita bloquear Flask
 
         self._thread = threading.Thread(
             target=self._loop, daemon=True, name=f"cam-{cam_id}"
@@ -320,33 +323,51 @@ class CameraWorker:
         self._thread.join(timeout=5)
 
     # -----------------------------------------------------------------------
+    def _build_stats_dict(self) -> dict:
+        """Construye el dict de stats. Debe llamarse con self._lock adquirido."""
+        c = self.counter
+        if c.counting_mode == "fov":
+            in_val, out_val, net_val = c.fov_count, 0, c.persons_in_frame
+        else:
+            in_val  = c.in_count
+            out_val = c.out_count
+            net_val = c.persons_in_frame
+        return {
+            "id":        self.cam_id,
+            "name":      self.cam_name,
+            "in":        in_val,
+            "out":       out_val,
+            "net":       net_val,
+            "in_frame":  c.persons_in_frame,
+            "fps":       round(c.fps, 1),
+            "connected": self.connected,
+            "mode":      c.counting_mode,
+            "config": {
+                "cam_index":   self.cam_index,
+                "line_pos":    round(c.line_position, 2),
+                "line_orient": c.line_orientation,
+                "mode":        c.counting_mode,
+                "confidence":  round(c.confidence, 2),
+            },
+        }
+
     def get_stats(self) -> dict:
+        """Retorna stats sin bloquear: si YOLO esta corriendo devuelve el cache."""
+        if self._lock.acquire(timeout=0.05):
+            try:
+                stats = self._build_stats_dict()
+                self._stats_cache = stats
+                return stats
+            finally:
+                self._lock.release()
+        # Lock ocupado (inferencia en curso) — devolver ultimo valor conocido
+        if self._stats_cache is not None:
+            return self._stats_cache
+        # Primera llamada antes del primer frame: esperar
         with self._lock:
-            c = self.counter
-            if c.counting_mode == "fov":
-                in_val, out_val, net_val = c.fov_count, 0, c.persons_in_frame
-            else:
-                in_val  = c.in_count
-                out_val = c.out_count
-                net_val = c.persons_in_frame
-            return {
-                "id":        self.cam_id,
-                "name":      self.cam_name,
-                "in":        in_val,
-                "out":       out_val,
-                "net":       net_val,
-                "in_frame":  c.persons_in_frame,
-                "fps":       round(c.fps, 1),
-                "connected": self.connected,
-                "mode":      c.counting_mode,
-                "config": {
-                    "cam_index":  self.cam_index,
-                    "line_pos":   round(c.line_position, 2),
-                    "line_orient": c.line_orientation,
-                    "mode":       c.counting_mode,
-                    "confidence": round(c.confidence, 2),
-                },
-            }
+            stats = self._build_stats_dict()
+            self._stats_cache = stats
+            return stats
 
     def get_snapshot(self) -> bytes | None:
         """Devuelve el ultimo frame anotado como JPEG, o None si no hay frame."""
@@ -1301,6 +1322,51 @@ def _autosave_loop():
 
 
 # ===========================================================================
+# Watchdog de hilos de camara
+# ===========================================================================
+def _watchdog_loop():
+    """Revisa cada 30 s que los hilos de camara sigan vivos; los reinicia si no."""
+    time.sleep(60)  # dar tiempo al arranque
+    while True:
+        time.sleep(30)
+        for w in camera_workers:
+            if not w._thread.is_alive() and not w._stop_event.is_set():
+                logger.error(
+                    "Watchdog: hilo camara %d (%s) muerto. Reiniciando...",
+                    w.cam_id, w.cam_name,
+                )
+                w._thread = threading.Thread(
+                    target=w._loop, daemon=True, name=f"cam-{w.cam_id}"
+                )
+                w._thread.start()
+
+
+# ===========================================================================
+# Cierre limpio (guarda CSV al recibir SIGTERM / Ctrl-C)
+# ===========================================================================
+def _save_all_csv():
+    csv_dir  = os.path.dirname(os.path.abspath(__file__))
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    for w in camera_workers:
+        filepath = os.path.join(csv_dir, f"conteo_cam{w.cam_id}_{date_str}.csv")
+        try:
+            with w._lock:
+                w.counter.export_csv(filepath)
+            logger.info("CSV guardado: %s", filepath)
+        except Exception as e:
+            logger.error("Error guardando CSV camara %d: %s", w.cam_id, e)
+
+
+def _shutdown(signum, frame):
+    logger.info("Senal %s recibida. Guardando datos y cerrando...", signum)
+    _save_all_csv()
+    for w in camera_workers:
+        w.stop()
+    logger.info("Servidor detenido limpiamente.")
+    os._exit(0)
+
+
+# ===========================================================================
 # Main
 # ===========================================================================
 def main():
@@ -1329,10 +1395,15 @@ def main():
 
     camera_workers = workers
 
+    # Registrar cierre limpio
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT,  _shutdown)
+
     for w in camera_workers:
         w.start()
 
     threading.Thread(target=_autosave_loop, daemon=True, name="autosave").start()
+    threading.Thread(target=_watchdog_loop, daemon=True, name="watchdog").start()
 
     logger.info("Servidor en http://0.0.0.0:%d", SERVER_PORT)
     logger.info("Acceder desde la red: http://<ip-dispositivo>:%d", SERVER_PORT)

@@ -214,3 +214,47 @@
 2026-02-23 15:10:23,472 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
 2026-02-23 15:10:27,897 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
 2026-02-23 15:12:15,250 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.65, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.35}
+2026-02-23 15:31:28,417 [INFO] ============================================================
+2026-02-23 15:31:28,417 [INFO] Servidor Multi-Camara - Contador de Personas
+2026-02-23 15:31:28,418 [INFO] Modelo: yolov8n.pt | Confianza: 0.35 | Modo: line
+2026-02-23 15:31:28,418 [INFO] ============================================================
+2026-02-23 15:31:28,418 [INFO] Cargando modelo para camara 0 (Entrada Principal)...
+2026-02-23 15:31:28,418 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:31:28,444 [INFO] Modelo cargado.
+2026-02-23 15:31:28,444 [INFO] Cargando modelo para camara 1 (Entrada Lateral Izq)...
+2026-02-23 15:31:28,445 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:31:28,467 [INFO] Modelo cargado.
+2026-02-23 15:31:28,467 [INFO] Cargando modelo para camara 2 (Entrada Lateral Der)...
+2026-02-23 15:31:28,467 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:31:28,489 [INFO] Modelo cargado.
+2026-02-23 15:31:28,490 [INFO] CameraWorker 0 (Entrada Principal) iniciado.
+2026-02-23 15:31:28,491 [INFO] CameraWorker 1 (Entrada Lateral Izq) iniciado.
+2026-02-23 15:31:28,491 [INFO] CameraWorker 2 (Entrada Lateral Der) iniciado.
+2026-02-23 15:31:28,493 [INFO] Servidor en http://0.0.0.0:5000
+2026-02-23 15:31:28,493 [INFO] Acceder desde la red: http://<ip-dispositivo>:5000
+2026-02-23 15:31:29,039 [INFO] Camara 0 abierta con backend DSHOW.
+2026-02-23 15:31:29,041 [INFO] Camara 0 lista (640x480).
+2026-02-23 15:31:29,168 [INFO] Camara 2 abierta con backend DSHOW.
+2026-02-23 15:31:29,168 [INFO] Camara 2 lista (640x480).
+2026-02-23 15:31:29,523 [INFO] Camara 1 abierta con backend DSHOW.
+2026-02-23 15:31:29,524 [INFO] Camara 1 lista (640x480).
+2026-02-23 15:31:51,562 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.6}
+2026-02-23 15:32:01,224 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.6}
+2026-02-23 15:32:10,536 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.35, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.6}
+2026-02-23 15:33:07,610 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.55, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.6}
+2026-02-23 15:35:01,761 [INFO] Senal 2 recibida. Guardando datos y cerrando...
+2026-02-23 15:35:01,805 [INFO] CSV exportado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam0_2026-02-23.csv
+2026-02-23 15:35:01,806 [INFO] CSV guardado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam0_2026-02-23.csv
+2026-02-23 15:35:01,881 [INFO] CSV exportado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam1_2026-02-23.csv
+2026-02-23 15:35:01,881 [INFO] CSV guardado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam1_2026-02-23.csv
+2026-02-23 15:35:01,888 [INFO] Senal 2 recibida. Guardando datos y cerrando...
+2026-02-23 15:35:01,908 [INFO] CSV exportado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam0_2026-02-23.csv
+2026-02-23 15:35:01,909 [INFO] CSV guardado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam0_2026-02-23.csv
+2026-02-23 15:35:01,984 [INFO] CSV exportado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam1_2026-02-23.csv
+2026-02-23 15:35:01,984 [INFO] CSV guardado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam1_2026-02-23.csv
+2026-02-23 15:35:02,023 [INFO] CSV exportado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam2_2026-02-23.csv
+2026-02-23 15:35:02,023 [INFO] CSV guardado: C:\Users\camil\Documents\PROYECTOS\CONTADOR_PERSONAS\CODIGO_3\conteo_cam2_2026-02-23.csv
+2026-02-23 15:35:02,356 [INFO] Hilo camara 0 finalizado.
+2026-02-23 15:35:02,931 [INFO] Hilo camara 1 finalizado.
+2026-02-23 15:35:03,315 [INFO] Hilo camara 2 finalizado.
+2026-02-23 15:35:03,319 [INFO] Servidor detenido limpiamente.
