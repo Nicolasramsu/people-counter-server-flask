@@ -156,3 +156,61 @@
 2026-02-23 14:11:52,383 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.65}
 2026-02-23 14:11:54,957 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.65}
 2026-02-23 14:11:57,183 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.65}
+2026-02-23 15:01:50,388 [INFO] ============================================================
+2026-02-23 15:01:50,389 [INFO] Servidor Multi-Camara - Contador de Personas
+2026-02-23 15:01:50,389 [INFO] Modelo: yolov8n.pt | Confianza: 0.35 | Modo: line
+2026-02-23 15:01:50,389 [INFO] ============================================================
+2026-02-23 15:01:50,389 [INFO] Cargando modelo para camara 0 (Entrada Principal)...
+2026-02-23 15:01:50,389 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:01:50,415 [INFO] Modelo cargado.
+2026-02-23 15:01:50,415 [INFO] Cargando modelo para camara 1 (Entrada Lateral Izq)...
+2026-02-23 15:01:50,415 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:01:50,437 [INFO] Modelo cargado.
+2026-02-23 15:01:50,437 [INFO] Cargando modelo para camara 2 (Entrada Lateral Der)...
+2026-02-23 15:01:50,437 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:01:50,460 [INFO] Modelo cargado.
+2026-02-23 15:01:50,461 [INFO] CameraWorker 0 (Entrada Principal) iniciado.
+2026-02-23 15:01:50,462 [INFO] CameraWorker 1 (Entrada Lateral Izq) iniciado.
+2026-02-23 15:01:50,463 [INFO] CameraWorker 2 (Entrada Lateral Der) iniciado.
+2026-02-23 15:01:50,463 [INFO] Servidor en http://0.0.0.0:5000
+2026-02-23 15:01:50,463 [INFO] Acceder desde la red: http://<ip-dispositivo>:5000
+2026-02-23 15:01:51,117 [INFO] Camara 0 abierta con backend DSHOW.
+2026-02-23 15:01:51,118 [INFO] Camara 0 lista (640x480).
+2026-02-23 15:01:51,234 [INFO] Camara 2 abierta con backend DSHOW.
+2026-02-23 15:01:51,234 [INFO] Camara 2 lista (640x480).
+2026-02-23 15:01:51,607 [INFO] Camara 1 abierta con backend DSHOW.
+2026-02-23 15:01:51,608 [INFO] Camara 1 lista (640x480).
+2026-02-23 15:03:11,024 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.65}
+2026-02-23 15:03:19,357 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
+2026-02-23 15:03:24,262 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.25}
+2026-02-23 15:05:10,790 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.5, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.7}
+2026-02-23 15:08:57,245 [INFO] ============================================================
+2026-02-23 15:08:57,245 [INFO] Servidor Multi-Camara - Contador de Personas
+2026-02-23 15:08:57,245 [INFO] Modelo: yolov8n.pt | Confianza: 0.35 | Modo: line
+2026-02-23 15:08:57,245 [INFO] ============================================================
+2026-02-23 15:08:57,246 [INFO] Cargando modelo para camara 0 (Entrada Principal)...
+2026-02-23 15:08:57,246 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:08:57,272 [INFO] Modelo cargado.
+2026-02-23 15:08:57,273 [INFO] Cargando modelo para camara 1 (Entrada Lateral Izq)...
+2026-02-23 15:08:57,273 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:08:57,294 [INFO] Modelo cargado.
+2026-02-23 15:08:57,295 [INFO] Cargando modelo para camara 2 (Entrada Lateral Der)...
+2026-02-23 15:08:57,295 [INFO] Cargando modelo YOLO: yolov8n.pt
+2026-02-23 15:08:57,317 [INFO] Modelo cargado.
+2026-02-23 15:08:57,319 [INFO] CameraWorker 0 (Entrada Principal) iniciado.
+2026-02-23 15:08:57,319 [INFO] CameraWorker 1 (Entrada Lateral Izq) iniciado.
+2026-02-23 15:08:57,320 [INFO] CameraWorker 2 (Entrada Lateral Der) iniciado.
+2026-02-23 15:08:57,321 [INFO] Servidor en http://0.0.0.0:5000
+2026-02-23 15:08:57,321 [INFO] Acceder desde la red: http://<ip-dispositivo>:5000
+2026-02-23 15:08:57,860 [INFO] Camara 0 abierta con backend DSHOW.
+2026-02-23 15:08:57,861 [INFO] Camara 0 lista (640x480).
+2026-02-23 15:08:58,014 [INFO] Camara 2 abierta con backend DSHOW.
+2026-02-23 15:08:58,014 [INFO] Camara 2 lista (640x480).
+2026-02-23 15:08:58,346 [INFO] Camara 1 abierta con backend DSHOW.
+2026-02-23 15:08:58,348 [INFO] Camara 1 lista (640x480).
+2026-02-23 15:09:16,519 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.65}
+2026-02-23 15:09:35,647 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.65, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.7}
+2026-02-23 15:09:41,441 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
+2026-02-23 15:10:23,472 [INFO] Config camara 2 actualizada: {'cam_index': 2, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
+2026-02-23 15:10:27,897 [INFO] Config camara 0 actualizada: {'cam_index': 0, 'line_pos': 0.5, 'line_orient': 'horizontal', 'mode': 'fov', 'confidence': 0.7}
+2026-02-23 15:12:15,250 [INFO] Config camara 1 actualizada: {'cam_index': 1, 'line_pos': 0.65, 'line_orient': 'vertical', 'mode': 'line', 'confidence': 0.35}

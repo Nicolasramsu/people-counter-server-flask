@@ -19,6 +19,7 @@ from ultralytics import YOLO
 import threading
 import time
 import csv
+import io
 import os
 import platform
 import logging
@@ -323,7 +324,7 @@ class CameraWorker:
         with self._lock:
             c = self.counter
             if c.counting_mode == "fov":
-                in_val, out_val, net_val = c.fov_count, 0, c.fov_count
+                in_val, out_val, net_val = c.fov_count, 0, c.persons_in_frame
             else:
                 in_val  = c.in_count
                 out_val = c.out_count
@@ -481,7 +482,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#141414;color:#e0e0e0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;padding:10px}
-h1{text-align:center;font-size:.95rem;font-weight:600;color:#666;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
+.brand{text-align:center;margin-bottom:12px;padding:10px 0 8px}
+.brand-name{font-size:1.7rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;background:linear-gradient(90deg,#00e676,#40c4ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+.brand-sub{font-size:.65rem;font-weight:500;color:#555;letter-spacing:.18em;text-transform:uppercase;margin-top:4px}
 
 /* ── Totales ── */
 .totals{background:#1e1e1e;border:1px solid #2a2a2a;border-radius:12px;padding:12px 8px;display:flex;justify-content:space-around;align-items:center;margin-bottom:10px}
@@ -577,10 +580,24 @@ input[type=range]{width:100%;accent-color:#00e676;margin-top:4px}
 
 .line-controls-wrapper{transition:opacity .2s}
 .line-controls-wrapper.dimmed{opacity:.3;pointer-events:none}
+
+/* ── Botones extra ── */
+.btn-chart{flex:1;padding:11px;border-radius:10px;border:none;background:#0d2a45;color:#40c4ff;font-size:.82rem;font-weight:600;cursor:pointer}
+.btn-export{flex:1;padding:11px;border-radius:10px;border:none;background:#0d2d1a;color:#00e676;font-size:.82rem;font-weight:600;cursor:pointer}
+.btn-chart:active,.btn-export:active{opacity:.75}
+
+/* ── Grafica horaria ── */
+#hourly-canvas{width:100%;height:auto;border-radius:8px;display:block;background:#161616}
+.chart-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;justify-content:center}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:.72rem;color:#888}
+.legend-swatch{width:12px;height:12px;border-radius:3px;flex-shrink:0}
 </style>
 </head>
 <body>
-<h1>Contador de Personas &mdash; Stand</h1>
+<div class="brand">
+  <div class="brand-name">Xenith AI</div>
+  <div class="brand-sub">Sistema de conteo de personas</div>
+</div>
 
 <div class="totals">
   <div class="t-item">
@@ -600,7 +617,9 @@ input[type=range]{width:100%;accent-color:#00e676;margin-top:4px}
 </div>
 
 <div class="global-actions">
-  <button class="btn-danger" onclick="resetAll()">&#8635; Reiniciar todas las camaras</button>
+  <button class="btn-danger" onclick="resetAll()">&#8635; Reiniciar</button>
+  <button class="btn-chart"  onclick="openChart()">&#128202; Gr&#225;fica</button>
+  <button class="btn-export" onclick="downloadExcel()">&#8659; Excel</button>
 </div>
 
 <div class="cameras-grid" id="cameras-grid">
@@ -695,6 +714,27 @@ input[type=range]{width:100%;accent-color:#00e676;margin-top:4px}
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('config')">Cancelar</button>
       <button class="btn-primary" id="save-cfg-btn" onclick="saveConfig()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     MODAL: GRAFICA HORARIA
+═══════════════════════════════════════════════════ -->
+<div id="chart-modal" class="modal hidden">
+  <div class="modal-overlay" onclick="closeModal('chart')"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="title">Personas por hora del d&#237;a</span>
+      <button class="modal-close" onclick="closeModal('chart')">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <canvas id="hourly-canvas" width="700" height="240"></canvas>
+      <div class="chart-legend" id="chart-legend"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('chart')">Cerrar</button>
+      <button class="btn-primary" onclick="loadChart()">&#8635; Actualizar</button>
     </div>
   </div>
 </div>
@@ -936,6 +976,101 @@ async function resetAll() {
   await fetch('/api/reset/all', {method:'POST'}).catch(()=>{});
 }
 
+// ─── chart ────────────────────────────────────────────────────────
+const CAM_COLORS = ['#00e676', '#40c4ff', '#ffab40'];
+
+async function openChart() {
+  document.getElementById('chart-modal').classList.remove('hidden');
+  await loadChart();
+}
+
+async function loadChart() {
+  try {
+    const resp = await fetch('/api/stats');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderChart(data);
+    renderLegend(data.cameras);
+  } catch(e) {}
+}
+
+function renderLegend(cameras) {
+  document.getElementById('chart-legend').innerHTML = cameras.map((cam, i) =>
+    `<div class="legend-item">
+       <div class="legend-swatch" style="background:${CAM_COLORS[i]||'#888'}"></div>
+       ${cam.name}
+     </div>`
+  ).join('');
+}
+
+function renderChart(data) {
+  const canvas  = document.getElementById('hourly-canvas');
+  const ctx     = canvas.getContext('2d');
+  const cameras = data.cameras;
+  const W = 700, H = 240;
+  const pad = {left: 40, right: 8, top: 18, bottom: 32};
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top  - pad.bottom;
+  const bw = cW / 24;
+
+  // valores por camara por hora
+  const vals = cameras.map(cam =>
+    Array.from({length: 24}, (_, h) => cam.hourly[String(h)] || 0)
+  );
+  const hourTotals = Array.from({length: 24}, (_, h) =>
+    cameras.reduce((s, _, ci) => s + vals[ci][h], 0)
+  );
+  const maxV = Math.max(...hourTotals, 1);
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#161616';
+  ctx.fillRect(0, 0, W, H);
+
+  // lineas de cuadricula
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + cH - (i / 4) * cH;
+    ctx.strokeStyle = '#252525';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y); ctx.stroke();
+    ctx.fillStyle = '#555';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(maxV * i / 4), pad.left - 5, y + 3);
+  }
+
+  // barras apiladas por camara
+  for (let h = 0; h < 24; h++) {
+    let base = pad.top + cH;
+    const x  = pad.left + h * bw + 1;
+    cameras.forEach((_, ci) => {
+      const v = vals[ci][h];
+      if (!v) return;
+      const bh = (v / maxV) * cH;
+      base -= bh;
+      ctx.fillStyle = CAM_COLORS[ci] || '#888';
+      ctx.fillRect(x, base, bw - 2, bh);
+    });
+  }
+
+  // resalte hora actual
+  const nowH = new Date().getHours();
+  ctx.fillStyle = '#ffffff0a';
+  ctx.fillRect(pad.left + nowH * bw, pad.top, bw, cH);
+
+  // etiquetas eje X (cada 2 horas)
+  for (let h = 0; h < 24; h += 2) {
+    ctx.fillStyle = '#555';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(h + 'h', pad.left + h * bw + bw / 2, H - 10);
+  }
+}
+
+// ─── excel ────────────────────────────────────────────────────────
+function downloadExcel() {
+  window.location.href = '/api/export';
+}
+
 // ─── start ────────────────────────────────────────────────────────
 fetchCounts();
 setInterval(fetchCounts, 1000);
@@ -1022,6 +1157,128 @@ def api_reset_all():
     for w in camera_workers:
         w.reset()
     return jsonify({"status": "ok", "reset": "all"})
+
+
+# ===========================================================================
+# Stats horarias y exportacion Excel
+# ===========================================================================
+@app.route("/api/stats")
+def api_stats():
+    cameras = []
+    for w in camera_workers:
+        with w._lock:
+            c = w.counter
+            hourly = dict(c.hourly_entries)
+            # incluir intervalo parcial actual (aun no volcado a hourly_entries)
+            current_hour = datetime.now().hour
+            if c.counting_mode == "fov":
+                partial = c.fov_count - c._interval_fov_start
+            else:
+                partial = c.in_count - c._interval_in_start
+            if partial > 0:
+                hourly[current_hour] = hourly.get(current_hour, 0) + partial
+        cameras.append({
+            "id":     w.cam_id,
+            "name":   w.cam_name,
+            "hourly": {str(k): v for k, v in hourly.items()},
+        })
+    return jsonify({"cameras": cameras})
+
+
+@app.route("/api/export")
+def api_export():
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+    except ImportError:
+        return "Dependencia faltante. Ejecuta: pip install openpyxl", 501
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # snapshot thread-safe de todos los contadores
+    snaps = []
+    for w in camera_workers:
+        with w._lock:
+            c = w.counter
+            intervals = list(c.interval_data)
+            # agregar intervalo parcial actual
+            if c.counting_mode == "fov":
+                partial_in = c.fov_count - c._interval_fov_start
+                partial_out = 0
+                if partial_in > 0:
+                    intervals.append((datetime.now().strftime("%H:%M"), partial_in, 0, c.fov_count, 0))
+            else:
+                partial_in  = c.in_count  - c._interval_in_start
+                partial_out = c.out_count - c._interval_out_start
+                if partial_in > 0 or partial_out > 0:
+                    intervals.append((datetime.now().strftime("%H:%M"), partial_in, partial_out, c.in_count, c.out_count))
+            hourly = dict(c.hourly_entries)
+            ch = datetime.now().hour
+            p = partial_in if c.counting_mode != "fov" else (c.fov_count - c._interval_fov_start)
+            if p > 0:
+                hourly[ch] = hourly.get(ch, 0) + p
+            snaps.append({
+                "id":        w.cam_id,
+                "name":      w.cam_name,
+                "mode":      c.counting_mode,
+                "intervals": intervals,
+                "hourly":    hourly,
+            })
+
+    wb = Workbook()
+
+    # ── Hoja 1: resumen por hora ──────────────────────────────────────
+    ws = wb.active
+    ws.title = "Resumen por hora"
+    header = ["Hora"] + [s["name"] for s in snaps] + ["TOTAL"]
+    ws.append(header)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    ws.column_dimensions["A"].width = 8
+    for col_idx in range(2, len(snaps) + 3):
+        col_letter = ws.cell(row=1, column=col_idx).column_letter
+        ws.column_dimensions[col_letter].width = 22
+
+    grand_total = 0
+    for hour in range(24):
+        row = [f"{hour:02d}:00"]
+        row_sum = 0
+        for s in snaps:
+            val = s["hourly"].get(hour, 0)
+            row.append(val)
+            row_sum += val
+        row.append(row_sum)
+        grand_total += row_sum
+        ws.append(row)
+
+    total_row = ["TOTAL"] + [sum(s["hourly"].values()) for s in snaps] + [grand_total]
+    ws.append(total_row)
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
+
+    # ── Hoja por camara ───────────────────────────────────────────────
+    for s in snaps:
+        ws2 = wb.create_sheet(title=s["name"][:31])
+        if s["mode"] == "fov":
+            ws2.append(["Hora", "Personas intervalo", "Personas total"])
+            for row in s["intervals"]:
+                ws2.append([row[0], row[1], row[3]])
+        else:
+            ws2.append(["Hora", "Entradas intervalo", "Salidas intervalo",
+                        "Entradas total", "Salidas total"])
+            for row in s["intervals"]:
+                ws2.append([row[0], row[1], row[2], row[3], row[4]])
+        for cell in ws2[1]:
+            cell.font = Font(bold=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        buf.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=conteo_{date_str}.xlsx"},
+    )
 
 
 # ===========================================================================
