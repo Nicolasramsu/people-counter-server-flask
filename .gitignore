@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+wheels/
+
+# Logs
+*.log
+*.log.*
+
+# CSV exports (generated at runtime)
+conteo_cam*.csv
+
+# YOLO model weights (large binary, download separately)
+*.pt
+*.onnx
+*.engine
+*.tflite
+
+# YOLOv8 / Ultralytics cache
+runs/
+ultralytics/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.*
+
+# Claude Code
+CLAUDE.md
