@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contador de Personas — Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ================================================================
+       HEADER
+  ================================================================ -->
+  <header class="header">
+    <div class="header-brand">
+      <span class="header-icon">👥</span>
+      <div>
+        <h1 class="header-title">Contador de Personas</h1>
+        <p class="header-subtitle">Dashboard de análisis en tiempo real</p>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="status-indicator">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Conectando…</span>
+      </div>
+      <div class="header-clock" id="currentTime">--:--:--</div>
+      <div class="fps-badge" id="fpsBadge">-- fps</div>
+    </div>
+  </header>
+
+  <!-- ================================================================
+       MAIN GRID
+  ================================================================ -->
+  <main class="main-grid">
+
+    <!-- ── Columna izquierda: video ────────────────────────────────── -->
+    <section class="video-section">
+      <div class="section-header">
+        <h2 class="section-title">Vista en vivo</h2>
+        <span class="mode-badge" id="modeBadge">Modo: línea</span>
+      </div>
+      <div class="video-wrapper">
+        <img id="videoFeed" src="/video_feed" alt="Vista de la cámara" />
+        <div class="video-overlay-tl" id="inFrameOverlay">
+          <span class="overlay-label">En cámara</span>
+          <span class="overlay-value" id="inFrameOverlayVal">0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Columna derecha: métricas + analítica ───────────────────── -->
+    <section class="right-panel">
+
+      <!-- 4 tarjetas de métricas principales -->
+      <div class="metrics-grid">
+        <div class="metric-card metric-green">
+          <div class="metric-value" id="inCount">0</div>
+          <div class="metric-label">Entradas hoy</div>
+        </div>
+        <div class="metric-card metric-red">
+          <div class="metric-value" id="outCount">0</div>
+          <div class="metric-label">Salidas hoy</div>
+        </div>
+        <div class="metric-card metric-yellow">
+          <div class="metric-value" id="inFrame">0</div>
+          <div class="metric-label">En cámara</div>
+        </div>
+        <div class="metric-card metric-blue">
+          <div class="metric-value" id="netFlow">+0</div>
+          <div class="metric-label">Flujo neto</div>
+        </div>
+      </div>
+
+      <!-- 4 tarjetas de analítica -->
+      <div class="analytics-grid">
+        <div class="analytics-card">
+          <div class="analytics-icon">🕐</div>
+          <div class="analytics-info">
+            <div class="analytics-value" id="peakHour">--</div>
+            <div class="analytics-label">Hora pico</div>
+          </div>
+        </div>
+        <div class="analytics-card">
+          <div class="analytics-icon">📊</div>
+          <div class="analytics-info">
+            <div class="analytics-value" id="hourlyAvg">0</div>
+            <div class="analytics-label">Prom. / hora</div>
+          </div>
+        </div>
+        <div class="analytics-card">
+          <div class="analytics-icon">👥</div>
+          <div class="analytics-info">
+            <div class="analytics-value" id="totalVisits">0</div>
+            <div class="analytics-label">Total del día</div>
+          </div>
+        </div>
+        <div class="analytics-card">
+          <div class="analytics-icon">⏱️</div>
+          <div class="analytics-info">
+            <div class="analytics-value" id="sessionStart">--:--</div>
+            <div class="analytics-label">Inicio sesión</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gráfico de visitas por hora -->
+      <div class="chart-section">
+        <h3 class="chart-title">Visitas por hora</h3>
+        <div class="chart-wrapper">
+          <canvas id="hourlyChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Acciones -->
+      <div class="actions">
+        <button class="btn-primary" id="btnDownload">
+          ⬇ Descargar informe CSV
+        </button>
+        <button class="btn-danger" id="btnReset">
+          ↺ Reiniciar contadores
+        </button>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
