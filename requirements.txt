@@ -1,0 +1,9 @@
+# Detección y tracking
+ultralytics>=8.4
+supervision>=0.27
+opencv-python-headless>=4.8   # headless: sin dependencias de GUI (ideal para Jetson)
+numpy>=1.24
+
+# Servidor web (API REST + WebSocket + archivos estáticos)
+flask>=3.0
+flask-sock>=0.7
