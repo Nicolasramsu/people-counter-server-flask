@@ -57,14 +57,12 @@ class PersonCounter:
         model_name: str = DEFAULT_MODEL,
         confidence: float = DEFAULT_CONFIDENCE,
         line_position: float = DEFAULT_LINE_POSITION_H,
-        line_orientation: str = "horizontal",
         infer_size: int = DEFAULT_INFER_SIZE,
     ) -> None:
         self.model_name = model_name
         self.confidence = confidence
         self.line_position = line_position
         self.line_position_vertical = DEFAULT_LINE_POSITION_V
-        self.line_orientation = line_orientation
         self.infer_size = infer_size
 
         # Parámetros de línea
@@ -179,15 +177,12 @@ class PersonCounter:
     def update_line(
         self,
         position: float,
-        orientation: str | None = None,
         position_vertical: float | None = None,
     ) -> None:
         """Actualiza la posición de las líneas de conteo."""
         self.line_position = position
         if position_vertical is not None:
             self.line_position_vertical = position_vertical
-        if orientation is not None:
-            self.line_orientation = orientation
         if isinstance(self._strategy, LineStrategy):
             self._strategy.update_config(
                 position_h=self.line_position,

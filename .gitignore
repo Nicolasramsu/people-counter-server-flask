@@ -23,7 +23,7 @@ wheels/
 *.log.*
 
 # CSV exports (generated at runtime)
-conteo_cam*.csv
+conteo_*.csv
 
 # YOLO model weights (large binary, download separately)
 *.pt

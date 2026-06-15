@@ -11,7 +11,6 @@ del sistema sin tocar la lógica principal.
 PERSON_CLASS_ID = 0
 
 DEFAULT_MODEL = "yolov8s.pt"
-AVAILABLE_MODELS = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"]
 
 DEFAULT_CONFIDENCE = 0.3
 DEFAULT_INFER_SIZE = 640
@@ -112,7 +111,7 @@ MAX_DETECTION_DEPTH_M = 8.0   # por encima → fondo irrelevante
 # ---------------------------------------------------------------------------
 # Servidor web
 # ---------------------------------------------------------------------------
-SERVER_HOST = "localhost"        # Escuchar en todas las interfaces
+SERVER_HOST = "0.0.0.0"         # Escuchar en todas las interfaces
 SERVER_PORT = 8000
 
 # Intervalo de broadcast de estadísticas por WebSocket (segundos)
