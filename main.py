@@ -15,8 +15,7 @@ import logging
 import os
 import sys
 
-from camera.capture import CameraCapture
-from config import AUTOSAVE_INTERVAL_S, SERVER_HOST, SERVER_PORT
+from config import AUTOSAVE_INTERVAL_S, CAMERA_BACKEND, CAMERA_SOURCE, SERVER_HOST, SERVER_PORT
 from core.person_counter import PersonCounter
 from server.app import create_app
 from utils.logger import setup_logging
@@ -46,9 +45,24 @@ def main() -> None:
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # 2. Captura de cámara
+    # 2. Captura de cámara (backend seleccionable en config.py)
     # ------------------------------------------------------------------
-    camera = CameraCapture(counter)
+    if CAMERA_BACKEND == "oak":
+        try:
+            from camera.oak_capture import OakCapture
+            camera = OakCapture(counter)
+            logger.info("Backend de cámara: OAK-D W (DepthAI)")
+        except ImportError:
+            logger.critical(
+                "CAMERA_BACKEND='oak' pero 'depthai' no está instalado. "
+                "Ejecuta: pip install depthai"
+            )
+            sys.exit(1)
+    else:
+        from camera.capture import CameraCapture
+        camera = CameraCapture(counter)
+        logger.info("Backend de cámara: OpenCV (fuente: %s)", CAMERA_SOURCE)
+
     camera.start()
 
     # ------------------------------------------------------------------

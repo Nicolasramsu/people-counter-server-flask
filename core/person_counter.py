@@ -1,11 +1,19 @@
-"""Motor de detección, tracking y conteo de personas.
+"""Orquestador de detección, tracking y conteo de personas.
 
-Usa YOLOv8 para detección y ByteTrack para seguimiento de objetos.
-Soporta tres modos de conteo independientes:
-  - ``line``  : cruce de una o dos líneas (horizontal y/o vertical).
-  - ``roi``   : entrada/salida de una zona rectangular de interés.
-  - ``fov``   : campo de visión — acumula cada ID único visto al menos una vez.
+Responsabilidades de esta clase (Single Responsibility por capa):
+  - Cargar y ejecutar el modelo YOLO.
+  - Gestionar el tracker ByteTrack.
+  - Delegar la lógica de conteo a la estrategia activa (CountingStrategy).
+  - Calcular estadísticas de intervalo y exportar CSV.
+  - Proveer la interfaz pública que usa el servidor Flask.
+
+La lógica de conteo específica de cada modo vive en:
+  ``core/strategies/line_strategy.py``
+  ``core/strategies/polygon_strategy.py``
+  ``core/strategies/fov_strategy.py``
 """
+
+from __future__ import annotations
 
 import csv
 import logging
@@ -24,23 +32,25 @@ from config import (
     DEFAULT_INFER_SIZE,
     DEFAULT_LINE_POSITION_H,
     DEFAULT_LINE_POSITION_V,
-    DEFAULT_MODEL,
     DEFAULT_ROI,
     INFERENCE_DEVICE,
     INTERVAL_SECONDS,
+    MAX_DETECTION_DEPTH_M,
+    MIN_DETECTION_DEPTH_M,
     PERSON_CLASS_ID,
-    TRACKER_RESET_INTERVAL_S,
+    STALE_TRACK_CLEANUP_INTERVAL_S,
+    STALE_TRACK_THRESHOLD_S,
+    TRACKER_MATCHING_THRESHOLD,
+    DEFAULT_MODEL,
 )
+from core.counting_strategy import CountingStrategy
+from core.strategies import FovStrategy, LineStrategy, PolygonStrategy
 
 logger = logging.getLogger("ContadorPersonas")
 
 
 class PersonCounter:
-    """Motor de detección, tracking y conteo de personas.
-
-    Esta clase no tiene ninguna dependencia con la interfaz gráfica;
-    puede usarse de forma independiente o en pruebas unitarias.
-    """
+    """Orquestador de detección, tracking y conteo de personas."""
 
     def __init__(
         self,
@@ -55,37 +65,28 @@ class PersonCounter:
         self.line_position = line_position
         self.line_position_vertical = DEFAULT_LINE_POSITION_V
         self.line_orientation = line_orientation
+        self.infer_size = infer_size
 
-        # Líneas activas
+        # Parámetros de línea
         self.use_horizontal_line = True
         self.use_vertical_line = False
 
-        # ROI (coordenadas normalizadas 0–1)
+        # Parámetros de ROI (coordenadas normalizadas 0–1)
         self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2 = DEFAULT_ROI
-        self.use_roi_mode = False
 
-        # Resolución de inferencia YOLO
-        self.infer_size = infer_size
-
-        # Modo de conteo: "line" | "roi" | "fov"
+        # Modo activo: "line" | "roi" | "fov"
         self.counting_mode = "line"
 
-        # Contadores — modo línea / ROI
-        self.in_count = 0
-        self.out_count = 0
-        self._in_offset = 0
-        self._out_offset = 0
-
-        # Contadores — modo FOV
-        self.fov_count = 0
-        self._fov_offset = 0
-        self._seen_ids: set = set()
+        # Dimensiones del frame (se fijan en setup_line)
+        self.frame_width = 640
+        self.frame_height = 480
 
         # Métricas de frame
         self.persons_in_frame = 0
         self.fps = 0.0
+        self._fps_buffer: deque = deque(maxlen=30)
 
-        # Estadísticas por intervalo y por hora
+        # Estadísticas por intervalo y hora
         self.interval_data: list = []
         self._last_interval_time: float | None = None
         self._interval_in_start = 0
@@ -93,75 +94,87 @@ class PersonCounter:
         self._interval_fov_start = 0
         self.hourly_entries: dict = {}
 
-        # Internos del pipeline de detección
+        # Motor YOLO y tracker
         self.model: YOLO | None = None
         self.tracker: sv.ByteTrack | None = None
-        self.line_zone: sv.LineZone | None = None
-        self.line_zone_horizontal: sv.LineZone | None = None
-        self.line_zone_vertical: sv.LineZone | None = None
-        self.frame_width = 640
-        self.frame_height = 480
-        self._fps_buffer: deque = deque(maxlen=30)
-        self._tracker_reset_time = time.time()
-        self._tracker_reset_interval = TRACKER_RESET_INTERVAL_S
 
-        # Estado de tracking por ID de objeto
-        self._tracker_side_h: dict = {}    # {tracker_id: "up" | "down"}
-        self._tracker_side_v: dict = {}    # {tracker_id: "left" | "right"}
-        self._area_threshold = AREA_THRESHOLD
-        self._tracker_in_roi: dict = {}    # {tracker_id: bool}
+        # Estrategia de conteo activa (se instancia en setup_line)
+        self._strategy: CountingStrategy | None = None
 
-        # Anotadores de supervision
-        self.box_annotator = sv.BoxAnnotator(thickness=2)
+        # Control de limpieza de estado stale
+        # Reemplaza al antiguo _periodic_tracker_reset que causaba doble conteo.
+        self._track_last_seen: dict[int, float] = {}
+        self._last_cleanup_time: float = time.monotonic()
+
+        # Anotadores visuales (cajas, trazas, etiquetas)
+        self.box_annotator   = sv.BoxAnnotator(thickness=2)
         self.label_annotator = sv.LabelAnnotator(text_thickness=1, text_scale=0.5)
         self.trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60)
-        self.line_annotator = sv.LineZoneAnnotator(thickness=2, text_thickness=2, text_scale=1)
+
+    # ------------------------------------------------------------------
+    # Propiedades de conteo (delegan a la estrategia activa)
+    # ------------------------------------------------------------------
+
+    @property
+    def in_count(self) -> int:
+        return self._strategy.get_counts().get("in_count", 0) if self._strategy else 0
+
+    @property
+    def out_count(self) -> int:
+        return self._strategy.get_counts().get("out_count", 0) if self._strategy else 0
+
+    @property
+    def fov_count(self) -> int:
+        return self._strategy.get_counts().get("fov_count", 0) if self._strategy else 0
 
     # ------------------------------------------------------------------
     # Inicialización
     # ------------------------------------------------------------------
 
     def load_model(self) -> None:
-        """Carga el modelo YOLO en el dispositivo configurado en ``INFERENCE_DEVICE``."""
+        """Carga el modelo YOLO en el dispositivo configurado."""
         logger.info("Cargando modelo YOLO: %s (device=%s)", self.model_name, INFERENCE_DEVICE)
         self.model = YOLO(self.model_name)
         self.model.to(INFERENCE_DEVICE)
         logger.info("Modelo cargado correctamente.")
 
     def setup_line(self, frame_width: int, frame_height: int) -> None:
-        """Configura la zona de conteo y el tracker para las dimensiones del video.
+        """Configura la estrategia y el tracker para las dimensiones del frame.
 
-        Debe llamarse una sola vez al abrir cada fuente de video, antes de
-        empezar a procesar frames.
+        Debe llamarse una vez al abrir la fuente de video, antes del primer frame.
         """
         self.frame_width = frame_width
         self.frame_height = frame_height
-        self._create_line_zone()
+        self._strategy = self._build_strategy()
         self._create_tracker()
         if self._last_interval_time is None:
             self._last_interval_time = time.time()
 
     # ------------------------------------------------------------------
-    # Configuración dinámica (accesible desde la GUI en tiempo real)
+    # Reconfiguración en caliente
     # ------------------------------------------------------------------
 
     def set_mode(self, mode: str) -> None:
-        """Cambia el modo de conteo activo.
-
-        Args:
-            mode: ``"line"``, ``"roi"`` o ``"fov"``.
-        """
+        """Cambia el modo de conteo activo y construye la estrategia correspondiente."""
         self.counting_mode = mode
-        self.use_roi_mode = (mode == "roi")
+        if self.model is not None:   # setup_line ya fue llamado
+            self._strategy = self._build_strategy()
         logger.info("Modo de conteo cambiado a: %s", mode)
 
     def set_roi(self, x1: float, y1: float, x2: float, y2: float) -> None:
-        """Define la zona rectangular de interés en coordenadas normalizadas (0–1)."""
+        """Define la zona de interés en coordenadas normalizadas (0–1)."""
         self.roi_x1 = min(x1, x2)
         self.roi_y1 = min(y1, y2)
         self.roi_x2 = max(x1, x2)
         self.roi_y2 = max(y1, y2)
-        logger.info("ROI actualizado: (%.2f, %.2f) -> (%.2f, %.2f)", x1, y1, x2, y2)
+        if isinstance(self._strategy, PolygonStrategy):
+            self._strategy.set_from_normalized_rect(
+                self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2
+            )
+        logger.info(
+            "ROI actualizado: (%.2f, %.2f) → (%.2f, %.2f)",
+            self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2,
+        )
 
     def update_line(
         self,
@@ -169,21 +182,33 @@ class PersonCounter:
         orientation: str | None = None,
         position_vertical: float | None = None,
     ) -> None:
-        """Actualiza la posición de las líneas de conteo y las recrea."""
+        """Actualiza la posición de las líneas de conteo."""
         self.line_position = position
         if position_vertical is not None:
             self.line_position_vertical = position_vertical
         if orientation is not None:
             self.line_orientation = orientation
-        self._create_line_zone()
+        if isinstance(self._strategy, LineStrategy):
+            self._strategy.update_config(
+                position_h=self.line_position,
+                position_v=self.line_position_vertical,
+            )
 
-    def set_line_enabled(self, horizontal: bool | None = None, vertical: bool | None = None) -> None:
-        """Habilita o deshabilita líneas individuales y las recrea."""
+    def set_line_enabled(
+        self,
+        horizontal: bool | None = None,
+        vertical: bool | None = None,
+    ) -> None:
+        """Habilita o deshabilita líneas individuales."""
         if horizontal is not None:
             self.use_horizontal_line = horizontal
         if vertical is not None:
             self.use_vertical_line = vertical
-        self._create_line_zone()
+        if isinstance(self._strategy, LineStrategy):
+            self._strategy.update_config(
+                use_horizontal=self.use_horizontal_line,
+                use_vertical=self.use_vertical_line,
+            )
 
     def update_confidence(self, confidence: float) -> None:
         self.confidence = confidence
@@ -192,15 +217,32 @@ class PersonCounter:
     # Procesamiento de frames
     # ------------------------------------------------------------------
 
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Procesa un frame individual. Wrapper de :meth:`process_batch`."""
-        return self.process_batch([frame])[0]
-
-    def process_batch(self, frames: list) -> list:
-        """Procesa una lista de frames en una sola llamada a YOLO (batch GPU).
+    def process_frame(
+        self, frame: np.ndarray, depth_frame: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Procesa un frame individual. Wrapper de ``process_batch``.
 
         Args:
-            frames: Lista de imágenes BGR (``np.ndarray``).
+            frame:       Imagen BGR capturada por la cámara.
+            depth_frame: Mapa de profundidad uint16 en milímetros, alineado al
+                         frame de color píxel a píxel. Opcional: si es None
+                         el filtro de profundidad no se aplica. Solo disponible
+                         con backend OAK-D W.
+        """
+        depth_frames = [depth_frame] if depth_frame is not None else None
+        return self.process_batch([frame], depth_frames=depth_frames)[0]
+
+    def process_batch(
+        self, frames: list, depth_frames: list | None = None
+    ) -> list:
+        """Procesa una lista de frames en una sola llamada YOLO (batch GPU).
+
+        Args:
+            frames:       Lista de imágenes BGR.
+            depth_frames: Lista de mapas de profundidad uint16 (mm), uno por
+                          frame. Puede ser None o tener menos elementos que
+                          ``frames``; los frames sin depth correspondiente no
+                          se filtran por profundidad.
 
         Returns:
             Lista de frames anotados en el mismo orden.
@@ -210,8 +252,7 @@ class PersonCounter:
         if self.model is None:
             return frames
 
-        if time.time() - self._tracker_reset_time > self._tracker_reset_interval:
-            self._periodic_tracker_reset()
+        self._maybe_cleanup_stale_tracks()
 
         results_list = self.model(
             frames,
@@ -223,24 +264,33 @@ class PersonCounter:
         )
 
         annotated = []
-        for frame, results in zip(frames, results_list):
+        for i, (frame, results) in enumerate(zip(frames, results_list)):
             detections = sv.Detections.from_ultralytics(results)
             detections = self.tracker.update_with_detections(detections)
 
-            if self.counting_mode == "fov":
-                self._update_fov_count(detections)
-            elif self.counting_mode == "roi":
-                self._detect_roi_crossings(detections)
-            else:
-                self._detect_crossings_with_area_threshold(detections)
+            # Filtrar por profundidad DESPUÉS del tracker (para no romper
+            # la continuidad de tracks) y ANTES de la estrategia (para no
+            # contar personas en el fondo del escenario).
+            df: np.ndarray | None = (
+                depth_frames[i]
+                if depth_frames is not None and i < len(depth_frames)
+                else None
+            )
+            if df is not None:
+                detections = self._filter_by_depth(detections, df)
+
+            self._update_track_activity(detections)
+
+            if self._strategy is not None:
+                self._strategy.update(detections)
 
             self.persons_in_frame = len(detections)
             self._check_interval()
 
-            annotated.append(self._annotate_frame(frame, detections))
+            annotated.append(self._annotate_frame(frame, detections, df))
 
         elapsed = time.perf_counter() - t_start
-        fps_batch = len(frames) / elapsed if elapsed > 0 else 0
+        fps_batch = len(frames) / elapsed if elapsed > 0 else 0.0
         self._fps_buffer.append(fps_batch)
         self.fps = sum(self._fps_buffer) / len(self._fps_buffer)
 
@@ -251,14 +301,9 @@ class PersonCounter:
     # ------------------------------------------------------------------
 
     def reset_counters(self) -> None:
-        """Reinicia todos los contadores y el estado interno del tracker."""
-        self.in_count = 0
-        self.out_count = 0
-        self._in_offset = 0
-        self._out_offset = 0
-        self.fov_count = 0
-        self._fov_offset = 0
-        self._seen_ids = set()
+        """Reinicia todos los contadores y el tracker (acción explícita del usuario)."""
+        if self._strategy is not None:
+            self._strategy.reset()
         self.persons_in_frame = 0
         self._interval_in_start = 0
         self._interval_out_start = 0
@@ -266,22 +311,14 @@ class PersonCounter:
         self._last_interval_time = time.time()
         self.interval_data.clear()
         self.hourly_entries.clear()
-        self._tracker_side_h.clear()
-        self._tracker_side_v.clear()
-        self._tracker_in_roi.clear()
-        self.line_zone = None
-        self.line_zone_horizontal = None
-        self.line_zone_vertical = None
-        self._create_line_zone()
+        self._track_last_seen.clear()
+        # Recrear el tracker solo aquí (reset explícito del usuario),
+        # nunca de forma automática para no generar IDs duplicados.
         self._create_tracker()
         logger.info("Contadores reiniciados.")
 
     def export_csv(self, filepath: str) -> None:
-        """Exporta los datos de conteo por intervalo a un archivo CSV.
-
-        Args:
-            filepath: Ruta completa del archivo ``.csv`` de salida.
-        """
+        """Exporta los datos de conteo por intervalo a un archivo CSV."""
         data = list(self.interval_data)
 
         with open(filepath, "w", newline="", encoding="utf-8") as f:
@@ -298,7 +335,7 @@ class PersonCounter:
                 for row in data:
                     writer.writerow([row[0], row[1], row[3]])
             else:
-                in_partial = self.in_count - self._interval_in_start
+                in_partial  = self.in_count  - self._interval_in_start
                 out_partial = self.out_count - self._interval_out_start
                 if in_partial > 0 or out_partial > 0:
                     data.append((
@@ -318,186 +355,83 @@ class PersonCounter:
         )
 
     # ------------------------------------------------------------------
-    # Métodos privados — líneas y tracker
+    # Métodos privados — tracker
     # ------------------------------------------------------------------
-
-    def _create_line_zone(self) -> None:
-        """Recrea las zonas de conteo conservando los conteos anteriores."""
-        if self.line_zone_horizontal is not None:
-            self._in_offset += self.line_zone_horizontal.in_count
-            self._out_offset += self.line_zone_horizontal.out_count
-        if self.line_zone_vertical is not None:
-            self._in_offset += self.line_zone_vertical.in_count
-            self._out_offset += self.line_zone_vertical.out_count
-
-        if self.use_horizontal_line:
-            y = int(self.frame_height * self.line_position)
-            self.line_zone_horizontal = sv.LineZone(
-                start=sv.Point(0, y),
-                end=sv.Point(self.frame_width, y),
-                triggering_anchors=[sv.Position.CENTER],
-            )
-        else:
-            self.line_zone_horizontal = None
-
-        if self.use_vertical_line:
-            x = int(self.frame_width * self.line_position_vertical)
-            self.line_zone_vertical = sv.LineZone(
-                start=sv.Point(x, 0),
-                end=sv.Point(x, self.frame_height),
-                triggering_anchors=[sv.Position.CENTER],
-            )
-        else:
-            self.line_zone_vertical = None
-
-        self.line_zone = self.line_zone_horizontal or self.line_zone_vertical
 
     def _create_tracker(self) -> None:
         self.tracker = sv.ByteTrack(
             track_activation_threshold=self.confidence,
-            minimum_matching_threshold=0.8,
+            minimum_matching_threshold=TRACKER_MATCHING_THRESHOLD,
             frame_rate=30,
         )
-        self._tracker_reset_time = time.time()
 
-    def _periodic_tracker_reset(self) -> None:
-        logger.info("Reset periódico del tracker.")
+    def _build_strategy(self) -> CountingStrategy:
+        """Instancia la estrategia correcta según ``self.counting_mode``."""
         if self.counting_mode == "fov":
-            self._fov_offset += len(self._seen_ids)
-            self._seen_ids = set()
-        self._tracker_side_h.clear()
-        self._tracker_side_v.clear()
-        self._create_tracker()
+            return FovStrategy()
+
+        if self.counting_mode == "roi":
+            strategy = PolygonStrategy(self.frame_width, self.frame_height)
+            strategy.set_from_normalized_rect(
+                self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2
+            )
+            return strategy
+
+        # "line" (modo por defecto)
+        return LineStrategy(
+            self.frame_width, self.frame_height,
+            line_position_h=self.line_position,
+            line_position_v=self.line_position_vertical,
+            use_horizontal=self.use_horizontal_line,
+            use_vertical=self.use_vertical_line,
+            area_threshold=AREA_THRESHOLD,
+        )
 
     # ------------------------------------------------------------------
-    # Métodos privados — detección de cruces
+    # Métodos privados — limpieza de estado stale
     # ------------------------------------------------------------------
 
-    def _detect_crossings_with_area_threshold(self, detections: sv.Detections) -> None:
-        """Detecta cruces de línea usando umbral de área del bounding box."""
-        if detections.tracker_id is None or len(detections) == 0:
+    def _update_track_activity(self, detections: sv.Detections) -> None:
+        """Registra el timestamp del último avistamiento de cada track activo."""
+        if detections.tracker_id is None:
+            return
+        now = time.monotonic()
+        for tid in detections.tracker_id:
+            self._track_last_seen[int(tid)] = now
+
+    def _maybe_cleanup_stale_tracks(self) -> None:
+        """Purga estado interno de tracks inactivos sin recrear el tracker.
+
+        Reemplaza al antiguo _periodic_tracker_reset. La diferencia clave:
+        el tracker ByteTrack NO se destruye ni se recrea. Solo se eliminan
+        las entradas de los diccionarios de estado de las estrategias para
+        tracks que llevan más de STALE_TRACK_THRESHOLD_S sin aparecer.
+
+        Esto libera memoria sin causar el bug de doble conteo.
+        """
+        now = time.monotonic()
+        if (now - self._last_cleanup_time) < STALE_TRACK_CLEANUP_INTERVAL_S:
             return
 
-        for i, tid in enumerate(detections.tracker_id):
-            x1, y1, x2, y2 = detections.xyxy[i]
-            bbox_area = (x2 - x1) * (y2 - y1)
-            if bbox_area == 0:
-                continue
+        stale_ids = {
+            tid
+            for tid, last_seen in self._track_last_seen.items()
+            if (now - last_seen) > STALE_TRACK_THRESHOLD_S
+        }
 
-            if self.line_zone_horizontal is not None:
-                self._check_horizontal_crossing(tid, x1, y1, x2, y2, bbox_area)
-            if self.line_zone_vertical is not None:
-                self._check_vertical_crossing(tid, x1, y1, x2, y2, bbox_area)
+        if stale_ids and self._strategy is not None:
+            self._strategy.purge_stale_tracks(stale_ids)
+            for tid in stale_ids:
+                self._track_last_seen.pop(tid, None)
+            logger.debug("Limpieza de tracks stale: %d eliminados.", len(stale_ids))
 
-    def _check_horizontal_crossing(
-        self, tid, x1: float, y1: float, x2: float, y2: float, bbox_area: float
-    ) -> None:
-        """Evalúa si el tracker cruzó la línea horizontal y actualiza contadores."""
-        y_line = int(self.frame_height * self.line_position)
+        self._last_cleanup_time = now
 
-        if y2 < y_line:
-            current_side = "up"
-        elif y1 > y_line:
-            current_side = "down"
-        else:
-            area_up = (x2 - x1) * (y_line - y1) if y1 < y_line else 0
-            area_down = (x2 - x1) * (y2 - y_line) if y2 > y_line else 0
-            if area_up / bbox_area >= self._area_threshold:
-                current_side = "up"
-            elif area_down / bbox_area >= self._area_threshold:
-                current_side = "down"
-            else:
-                current_side = self._tracker_side_h.get(tid)
-
-        prev_side = self._tracker_side_h.get(tid)
-        if current_side is not None:
-            if prev_side is not None and prev_side != current_side:
-                if current_side == "down":
-                    self.in_count += 1
-                    logger.debug("Cruce H: Tracker %s - IN (up->down)", tid)
-                else:
-                    self.out_count += 1
-                    logger.debug("Cruce H: Tracker %s - OUT (down->up)", tid)
-            self._tracker_side_h[tid] = current_side
-
-    def _check_vertical_crossing(
-        self, tid, x1: float, y1: float, x2: float, y2: float, bbox_area: float
-    ) -> None:
-        """Evalúa si el tracker cruzó la línea vertical y actualiza contadores."""
-        x_line = int(self.frame_width * self.line_position_vertical)
-
-        if x2 < x_line:
-            current_side = "left"
-        elif x1 > x_line:
-            current_side = "right"
-        else:
-            area_left = (y2 - y1) * (x_line - x1) if x1 < x_line else 0
-            area_right = (y2 - y1) * (x2 - x_line) if x2 > x_line else 0
-            if area_left / bbox_area >= self._area_threshold:
-                current_side = "left"
-            elif area_right / bbox_area >= self._area_threshold:
-                current_side = "right"
-            else:
-                current_side = self._tracker_side_v.get(tid)
-
-        prev_side = self._tracker_side_v.get(tid)
-        if current_side is not None:
-            if prev_side is not None and prev_side != current_side:
-                if current_side == "right":
-                    self.in_count += 1
-                    logger.debug("Cruce V: Tracker %s - IN (left->right)", tid)
-                else:
-                    self.out_count += 1
-                    logger.debug("Cruce V: Tracker %s - OUT (right->left)", tid)
-            self._tracker_side_v[tid] = current_side
-
-    def _detect_roi_crossings(self, detections: sv.Detections) -> None:
-        """Detecta entradas y salidas de la zona rectangular de interés."""
-        if detections.tracker_id is None or len(detections) == 0:
-            return
-
-        roi_x1_px = int(self.frame_width * self.roi_x1)
-        roi_y1_px = int(self.frame_height * self.roi_y1)
-        roi_x2_px = int(self.frame_width * self.roi_x2)
-        roi_y2_px = int(self.frame_height * self.roi_y2)
-
-        if (roi_x2_px - roi_x1_px) * (roi_y2_px - roi_y1_px) == 0:
-            return
-
-        for i, tid in enumerate(detections.tracker_id):
-            x1, y1, x2, y2 = detections.xyxy[i]
-
-            inter_x1 = max(x1, roi_x1_px)
-            inter_y1 = max(y1, roi_y1_px)
-            inter_x2 = min(x2, roi_x2_px)
-            inter_y2 = min(y2, roi_y2_px)
-
-            if inter_x1 < inter_x2 and inter_y1 < inter_y2:
-                inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
-                bbox_area = (x2 - x1) * (y2 - y1)
-                is_inside = bbox_area > 0 and (inter_area / bbox_area) >= self._area_threshold
-            else:
-                is_inside = False
-
-            was_inside = self._tracker_in_roi.get(tid, False)
-            if is_inside and not was_inside:
-                self.in_count += 1
-                logger.debug("ROI: Tracker %s - ENTRADA", tid)
-            elif not is_inside and was_inside:
-                self.out_count += 1
-                logger.debug("ROI: Tracker %s - SALIDA", tid)
-
-            self._tracker_in_roi[tid] = is_inside
-
-    def _update_fov_count(self, detections: sv.Detections) -> None:
-        """Acumula IDs únicos vistos (modo campo de visión)."""
-        if detections.tracker_id is not None:
-            for tid in detections.tracker_id:
-                self._seen_ids.add(tid)
-        self.fov_count = self._fov_offset + len(self._seen_ids)
+    # ------------------------------------------------------------------
+    # Métodos privados — estadísticas por intervalo
+    # ------------------------------------------------------------------
 
     def _check_interval(self) -> None:
-        """Registra un intervalo de estadísticas si transcurrió el tiempo configurado."""
         now = time.time()
         if self._last_interval_time is None:
             self._last_interval_time = now
@@ -514,29 +448,92 @@ class PersonCounter:
             self.hourly_entries[hora] = self.hourly_entries.get(hora, 0) + fov_interval
             self._interval_fov_start = self.fov_count
         else:
-            in_interval = self.in_count - self._interval_in_start
+            in_interval  = self.in_count  - self._interval_in_start
             out_interval = self.out_count - self._interval_out_start
             self.interval_data.append(
                 (hora_str, in_interval, out_interval, self.in_count, self.out_count)
             )
             self.hourly_entries[hora] = self.hourly_entries.get(hora, 0) + in_interval
-            self._interval_in_start = self.in_count
+            self._interval_in_start  = self.in_count
             self._interval_out_start = self.out_count
 
         self._last_interval_time = now
 
     # ------------------------------------------------------------------
+    # Métodos privados — filtro de profundidad
+    # ------------------------------------------------------------------
+
+    def _filter_by_depth(
+        self, detections: sv.Detections, depth_frame: np.ndarray
+    ) -> sv.Detections:
+        """Descarta detecciones fuera del rango de profundidad configurado.
+
+        Muestrea la profundidad en el centro del bounding box de cada
+        detección. Valores 0 del sensor (medición inválida) siempre se
+        descartan.
+
+        Args:
+            detections:  Detecciones ya actualizadas por el tracker.
+            depth_frame: Mapa uint16 en milímetros, misma resolución que
+                         el frame de color.
+
+        Returns:
+            Subconjunto de detecciones dentro del rango válido.
+        """
+        if len(detections) == 0 or detections.xyxy is None:
+            return detections
+
+        fh, fw = depth_frame.shape[:2]
+        mask = []
+        for box in detections.xyxy:
+            cx = int((box[0] + box[2]) / 2)
+            cy = int((box[1] + box[3]) / 2)
+            # Clamp por si el bbox toca el borde del frame
+            cx = max(0, min(cx, fw - 1))
+            cy = max(0, min(cy, fh - 1))
+            depth_mm = int(depth_frame[cy, cx])
+            if depth_mm == 0:
+                # Medición inválida del sensor estéreo → descartar
+                mask.append(False)
+                continue
+            depth_m = depth_mm / 1000.0
+            mask.append(MIN_DETECTION_DEPTH_M <= depth_m <= MAX_DETECTION_DEPTH_M)
+
+        return detections[np.array(mask, dtype=bool)]
+
+    def _depth_label(self, box: np.ndarray, depth_frame: np.ndarray) -> str:
+        """Retorna la profundidad en el centro del bbox como string legible."""
+        fh, fw = depth_frame.shape[:2]
+        cx = max(0, min(int((box[0] + box[2]) / 2), fw - 1))
+        cy = max(0, min(int((box[1] + box[3]) / 2), fh - 1))
+        d_mm = int(depth_frame[cy, cx])
+        return f"{d_mm / 1000:.1f}m" if d_mm > 0 else "?"
+
+    # ------------------------------------------------------------------
     # Métodos privados — anotación de frames
     # ------------------------------------------------------------------
 
-    def _annotate_frame(self, frame: np.ndarray, detections: sv.Detections) -> np.ndarray:
-        """Dibuja bounding boxes, trazas, etiquetas y overlays sobre el frame."""
+    def _annotate_frame(
+        self,
+        frame: np.ndarray,
+        detections: sv.Detections,
+        depth_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Dibuja bounding boxes, trazas, etiquetas y overlay del modo activo."""
         labels = []
         if detections.tracker_id is not None:
-            labels = [
-                f"#{tid} {conf:.0%}"
-                for tid, conf in zip(detections.tracker_id, detections.confidence)
-            ]
+            if depth_frame is not None:
+                labels = [
+                    f"#{tid} {conf:.0%} {self._depth_label(box, depth_frame)}"
+                    for tid, conf, box in zip(
+                        detections.tracker_id, detections.confidence, detections.xyxy
+                    )
+                ]
+            else:
+                labels = [
+                    f"#{tid} {conf:.0%}"
+                    for tid, conf in zip(detections.tracker_id, detections.confidence)
+                ]
 
         frame = self.trace_annotator.annotate(scene=frame, detections=detections)
         frame = self.box_annotator.annotate(scene=frame, detections=detections)
@@ -545,53 +542,15 @@ class PersonCounter:
                 scene=frame, detections=detections, labels=labels
             )
 
-        if self.counting_mode == "roi":
-            frame = self._draw_roi_overlay(frame)
-        elif self.counting_mode == "line":
-            frame = self._draw_line_overlay(frame)
+        if self._strategy is not None:
+            frame = self._strategy.draw_overlay(frame)
 
-        # Punto de centro de cada detección
+        # Punto central de cada detección
         if len(detections) > 0 and detections.xyxy is not None:
             for box in detections.xyxy:
                 cx = int((box[0] + box[2]) / 2)
                 cy = int((box[1] + box[3]) / 2)
                 cv2.circle(frame, (cx, cy), 5, (0, 255, 255), -1)
                 cv2.circle(frame, (cx, cy), 7, (0, 180, 180), 1)
-
-        return frame
-
-    def _draw_roi_overlay(self, frame: np.ndarray) -> np.ndarray:
-        x1 = int(self.frame_width * self.roi_x1)
-        y1 = int(self.frame_height * self.roi_y1)
-        x2 = int(self.frame_width * self.roi_x2)
-        y2 = int(self.frame_height * self.roi_y2)
-
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), -1)
-        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-        cv2.putText(
-            frame, f"IN: {self.in_count}  OUT: {self.out_count}",
-            (x1 + 10, y1 + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
-        )
-        return frame
-
-    def _draw_line_overlay(self, frame: np.ndarray) -> np.ndarray:
-        if self.line_zone_horizontal is not None:
-            y = int(self.frame_height * self.line_position)
-            cv2.line(frame, (0, y), (self.frame_width, y), (0, 255, 255), 3)
-            cv2.putText(
-                frame, f"IN: {self.in_count}  OUT: {self.out_count}",
-                (10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
-            )
-
-        if self.line_zone_vertical is not None:
-            x = int(self.frame_width * self.line_position_vertical)
-            cv2.line(frame, (x, 0), (x, self.frame_height), (255, 0, 255), 3)
-            if self.line_zone_horizontal is None:
-                cv2.putText(
-                    frame, f"IN: {self.in_count}  OUT: {self.out_count}",
-                    (x + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2,
-                )
 
         return frame
