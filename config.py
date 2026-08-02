@@ -27,6 +27,23 @@ AREA_THRESHOLD = 0.30           # Porcentaje mínimo del bbox para registrar cru
 # Con 0.6 el tracker re-asocia mejor tras oclusiones parciales.
 TRACKER_MATCHING_THRESHOLD = 0.60
 
+# Backend de tracking:
+#   "bytetrack" → sv.ByteTrack nativo (sin Re-ID, velocidad máxima)
+#   "boxmot"    → tracker BoxMOT con Re-ID (mejor re-asociación tras oclusiones)
+TRACKER_BACKEND  = "boxmot"
+
+# Algoritmo BoxMOT a usar cuando TRACKER_BACKEND="boxmot".
+# Todos los siguientes usan Re-ID por apariencia:
+#   "botsort"     → ByteTrack + Re-ID (mejor balance velocidad/precisión)
+#   "strongsort"  → Re-ID más agresivo (mejor para oclusiones largas)
+#   "deepocsort"  → OC-SORT + Re-ID (maneja bien trayectorias no lineales)
+BOXMOT_ALGORITHM = "botsort"
+
+# Modelo de Re-ID (se descarga automáticamente la primera vez en ~/.cache/boxmot/).
+# Opciones ligeras:  "osnet_x0_25_msmt17.pt"  ← recomendado para Jetson
+# Opciones pesadas:  "osnet_x1_0_msmt17.pt", "clip_market1501.pt"
+REID_MODEL = "osnet_x0_25_msmt17.pt"
+
 # Limpieza periódica de estado interno por tracks inactivos.
 # No recrea el tracker (evita el doble conteo del bug original).
 STALE_TRACK_THRESHOLD_S    = 10 * 60   # Track sin aparecer 10 min → stale
@@ -90,7 +107,7 @@ MJPEG_QUALITY = 80
 # Selección de backend:
 #   "opencv"  → usa cv2.VideoCapture (CAMERA_SOURCE arriba)
 #   "oak"     → usa DepthAI con Luxonis OAK-D W (requiere: pip install depthai)
-CAMERA_BACKEND = "opencv"
+CAMERA_BACKEND = "oak"
 
 # Framerate del sensor de color y del par estéreo
 OAK_RGB_FPS    = 30

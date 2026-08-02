@@ -8,6 +8,9 @@ numpy>=1.24
 flask>=3.0
 flask-sock>=0.7
 
+# Tracking con Re-ID — instalar solo con TRACKER_BACKEND="boxmot"
+boxmot>=10.0
+
 # Cámara Luxonis OAK-D W — instalar solo con CAMERA_BACKEND="oak"
 # En Jetson: pip install depthai
-# depthai>=2.21
+depthai>=2.21

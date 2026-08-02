@@ -153,6 +153,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--border);
   line-height: 0;
+  aspect-ratio: 16 / 9;   /* mantiene el espacio mientras la cámara inicializa */
 }
 .video-wrapper img {
   width: 100%;
@@ -160,6 +161,19 @@ body {
   display: block;
   object-fit: cover;
 }
+
+/* Cartel "Iniciando cámara" mientras no hay frames */
+.video-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+.video-loading.hidden { display: none; }
 
 /* Overlay sobre el video */
 .video-overlay-tl {

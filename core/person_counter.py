@@ -33,7 +33,6 @@ from config import (
     DEFAULT_ROI,
     INFERENCE_DEVICE,
     PERSON_CLASS_ID,
-    TRACKER_MATCHING_THRESHOLD,
 )
 from core.counting_strategy import CountingStrategy
 from core.depth_filter import DepthFilter
@@ -41,6 +40,7 @@ from core.frame_annotator import FrameAnnotator
 from core.interval_stats import IntervalStats
 from core.stale_track_cleaner import StaleTrackCleaner
 from core.strategies import FovStrategy, LineStrategy, PolygonStrategy
+from core.tracker_adapter import TrackerAdapter
 
 logger = logging.getLogger("ContadorPersonas")
 
@@ -72,8 +72,8 @@ class PersonCounter:
         self.fps = 0.0
         self._fps_buffer: deque = deque(maxlen=30)
 
-        self.model:     YOLO | None            = None
-        self.tracker:   sv.ByteTrack | None    = None
+        self.model:     YOLO | None             = None
+        self.tracker:   TrackerAdapter | None  = None
         self._strategy: CountingStrategy | None = None
 
         self._stats     = IntervalStats()
@@ -201,7 +201,7 @@ class PersonCounter:
         annotated = []
         for i, (frame, results) in enumerate(zip(frames, results_list)):
             detections = sv.Detections.from_ultralytics(results)
-            detections = self.tracker.update_with_detections(detections)
+            detections = self.tracker.update(detections, frame)
 
             df = depth_frames[i] if depth_frames and i < len(depth_frames) else None
             if df is not None:
@@ -246,11 +246,10 @@ class PersonCounter:
     # ------------------------------------------------------------------
 
     def _create_tracker(self) -> None:
-        self.tracker = sv.ByteTrack(
-            track_activation_threshold=self.confidence,
-            minimum_matching_threshold=TRACKER_MATCHING_THRESHOLD,
-            frame_rate=30,
-        )
+        if self.tracker is None:
+            self.tracker = TrackerAdapter(self.confidence)
+        else:
+            self.tracker.reset()
 
     def _build_strategy(self) -> CountingStrategy:
         if self.counting_mode == "fov":

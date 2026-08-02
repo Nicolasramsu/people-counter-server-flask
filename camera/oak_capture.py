@@ -213,7 +213,7 @@ class OakCapture:
         # a la misma resolución que el frame RGB.
         stereo = pipeline.create(dai.node.StereoDepth)
         stereo.setDefaultProfilePreset(
-            dai.node.StereoDepth.PresetType.HIGH_DENSITY
+            dai.node.StereoDepth.PresetMode.HIGH_DENSITY
         )
         stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
         stereo.setOutputSize(_RGB_W, _RGB_H)

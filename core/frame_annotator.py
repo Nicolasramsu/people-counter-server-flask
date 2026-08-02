@@ -29,7 +29,8 @@ class FrameAnnotator:
         strategy: CountingStrategy | None = None,
     ) -> np.ndarray:
         """Retorna el frame con todas las anotaciones aplicadas."""
-        frame = self._trace.annotate(scene=frame, detections=detections)
+        if detections.tracker_id is not None:
+            frame = self._trace.annotate(scene=frame, detections=detections)
         frame = self._box.annotate(scene=frame, detections=detections)
         if labels:
             frame = self._label.annotate(scene=frame, detections=detections, labels=labels)

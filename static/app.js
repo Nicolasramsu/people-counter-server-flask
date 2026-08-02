@@ -231,10 +231,18 @@ function startClock() {
  * (p.ej. al reconectar el servidor).
  */
 function monitorVideoFeed() {
-  const img = document.getElementById('videoFeed');
+  const img     = document.getElementById('videoFeed');
+  const loading = document.getElementById('videoLoading');
   if (!img) return;
 
+  // Ocultar cartel cuando llega el primer frame
+  img.addEventListener('load', () => {
+    if (loading) loading.classList.add('hidden');
+  });
+
+  // Reintentar stream si la conexión se corta
   img.addEventListener('error', () => {
+    if (loading) loading.classList.remove('hidden');
     setTimeout(() => {
       img.src = `/video_feed?t=${Date.now()}`;
     }, 2000);
